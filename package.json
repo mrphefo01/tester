@@ -1,15 +1,11 @@
 {
-  "name": "connect",
+  "name": "teams-connectivity-check",
   "version": "1.0.0",
-  "description": "Connectivity check server with ping endpoint",
+  "description": "Microsoft Teams network connectivity test tool",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
   "dependencies": {
     "express": "^5.2.1"
   },

@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Teams Connectivity Check</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      max-width: 700px;
+      margin: 0 auto;
+      padding: 24px;
+      text-align: center;
+    }
+    h1 { margin-bottom: 0.25rem; }
+    #status-badge {
+      display: inline-block;
+      margin: 16px 0;
+      padding: 10px 20px;
+      border-radius: 999px;
+      font-weight: 600;
+      color: #fff;
+    }
+    #status-badge.green { background: #16a34a; }
+    #status-badge.yellow { background: #facc15; color: #000; }
+    #status-badge.red { background: #dc2626; }
+    #results { margin-top: 16px; text-align: left; }
+    .metric { margin: 8px 0; background: #f8f8f8; padding: 10px; border-radius: 6px; }
+    button {
+      padding: 10px 18px;
+      font-size: 15px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      background: #0078d4;
+      color: white;
+    }
+    button:disabled { opacity: 0.6; cursor: wait; }
+    #progress-container {
+      width: 100%;
+      background: #eee;
+      border-radius: 4px;
+      margin: 20px 0;
+      overflow: hidden;
+      height: 30px;
+    }
+    #progress-bar {
+      height: 100%;
+      background: #0078d4;
+      width: 0%;
+      transition: width 0.3s;
+      color: white;
+      text-align: center;
+      line-height: 30px;
+    }
+    .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 0.8em; margin-left: 8px; }
+    .badge.green { background: #16a34a; }
+    .badge.yellow { background: #facc15; color: #000; }
+    .badge.red { background: #dc2626; }
+    #explanation { margin-top: 30px; font-size: 0.9rem; color: #444; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Teams Connectivity Check</h1>
+  <p>Run this test to check if your internet connection is suitable for high-quality Microsoft Teams calls.</p>
+
+  <button id="start-btn">Start test</button>
+
+  <div id="progress-container" style="display:none;">
+    <div id="progress-bar"></div>
+  </div>
+
+  <div id="status" style="margin-top: 12px;">
+    <span id="status-badge" style="display:none;"></span>
+    <div id="status-text"></div>
+  </div>
+
+  <div id="results"></div>
+
+  <div id="explanation">
+    <p><strong>How it works</strong></p>
+    <ul>
+      <li>We send 150 requests (~1KB each) to our server.</li>
+      <li>We measure round-trip time (latency), variation (jitter), packet loss, and estimated speed.</li>
+      <li>Results are compared against Microsoft's Teams network guidelines.</li>
+    </ul>
+    <p>No personal data is collected.</p>
+  </div>
+
+  <script>
+    const TEST_URL = "/ping?cachebust=";
+    const NUM_REQUESTS = 150;
+    const TIMEOUT_MS = 3000;
+    const APPROX_PAYLOAD_BYTES = 1024;
+
+    const startBtn = document.getElementById("start-btn");
+    const statusBadge = document.getElementById("status-badge");
+    const statusText = document.getElementById("status-text");
+    const resultsDiv = document.getElementById("results");
+    const progressContainer = document.getElementById("progress-container");
+    const progressBar = document.getElementById("progress-bar");
+
+    function resetUI() {
+      statusBadge.style.display = "none";
+      statusBadge.className = "";
+      statusBadge.textContent = "";
+      statusText.textContent = "";
+      resultsDiv.innerHTML = "";
+      progressContainer.style.display = "none";
+      progressBar.style.width = "0%";
+      progressBar.textContent = "";
+    }
+
+    function classifyMetric(value, greenMax, yellowMax) {
+      if (value <= greenMax) return "green";
+      if (value <= yellowMax) return "yellow";
+      return "red";
+    }
+
+    function computeStats(samples) {
+      if (samples.length === 0) return { avg: 0, stdDev: 0, min: 0, max: 0, median: 0 };
+
+      const sorted = [...samples].sort((a, b) => a - b);
+      const avg = samples.reduce((a, b) => a + b, 0) / samples.length;
+      const variance = samples.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / samples.length;
+      const stdDev = Math.sqrt(variance);
+      const min = sorted[0];
+      const max = sorted[sorted.length - 1];
+      const median = sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
+
+      return { avg, stdDev, min, max, median };
+    }
+
+    async function timedFetch(url, timeoutMs) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      const start = performance.now();
+      try {
+        const response = await fetch(url, {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const text = await response.text();
+        const end = performance.now();
+
+        const bytes = new TextEncoder().encode(text).length;
+        const durationSec = (end - start) / 1000;
+        const speedKbps = durationSec > 0 ? (bytes * 8) / durationSec / 1000 : 0;
+
+        return { ok: true, rtt: end - start, speedKbps };
+      } catch (err) {
+        clearTimeout(timeoutId);
+        return { ok: false };
+      }
+    }
+
+    async function runTest() {
+      resetUI();
+      startBtn.disabled = true;
+      startBtn.textContent = "Testing...";
+      progressContainer.style.display = "block";
+
+      const rtts = [];
+      const speeds = [];
+      let failed = 0;
+
+      for (let i = 0; i < NUM_REQUESTS; i++) {
+        const result = await timedFetch(TEST_URL + Math.random(), TIMEOUT_MS);
+        if (result.ok) {
+          rtts.push(result.rtt);
+          speeds.push(result.speedKbps);
+        } else {
+          failed++;
+        }
+        const progress = ((i + 1) / NUM_REQUESTS) * 100;
+        progressBar.style.width = progress + "%";
+        progressBar.textContent = `${i + 1}/${NUM_REQUESTS}`;
+      }
+
+      const { avg, stdDev, min, max, median } = computeStats(rtts);
+      const avgSpeed = speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
+      const packetLossPct = (failed / NUM_REQUESTS) * 100;
+
+      // Microsoft-aligned thresholds
+      const latencyClass = classifyMetric(avg, 100, 150);
+      const jitterClass = classifyMetric(stdDev, 30, 60);
+      const lossClass = classifyMetric(packetLossPct, 1, 5);
+      const bandwidthClass = classifyMetric(avgSpeed, 1500, 500); // >1.5Mbps good for HD
+
+      const order = { green: 1, yellow: 2, red: 3 };
+      let overallClass = "green";
+      [latencyClass, jitterClass, lossClass, bandwidthClass].forEach(c => {
+        if (order[c] > order[overallClass]) overallClass = c;
+      });
+
+      let overallText = "";
+      if (overallClass === "green") overallText = "Excellent! Your network is ideal for high-quality Teams calls.";
+      else if (overallClass === "yellow") overallText = "Fair – you may experience minor issues like occasional delays or reduced video quality.";
+      else overallText = "Poor – significant issues (choppy audio/video, freezing) are likely in Teams calls.";
+
+      statusBadge.style.display = "inline-block";
+      statusBadge.classList.add(overallClass);
+      statusBadge.textContent = overallClass.toUpperCase();
+      statusText.innerHTML = `<strong>${overallText}</strong>`;
+
+      resultsDiv.innerHTML = `
+        <h3>Detailed Results</h3>
+        <div class="metric">
+          <strong>Average Latency:</strong> ${avg.toFixed(0)} ms 
+          <span class="badge ${latencyClass}">${latencyClass.toUpperCase()}</span>
+          <small>(min: ${min.toFixed(0)}ms, max: ${max.toFixed(0)}ms, median: ${median.toFixed(0)}ms)</small>
+        </div>
+        <div class="metric">
+          <strong>Jitter:</strong> ${stdDev.toFixed(0)} ms 
+          <span class="badge ${jitterClass}">${jitterClass.toUpperCase()}</span>
+        </div>
+        <div class="metric">
+          <strong>Packet Loss:</strong> ${packetLossPct.toFixed(1)}% 
+          <span class="badge ${lossClass}">${lossClass.toUpperCase()}</span>
+        </div>
+        <div class="metric">
+          <strong>Est. Download Speed:</strong> ${avgSpeed.toFixed(0)} Kbps 
+          <span class="badge ${bandwidthClass}">${bandwidthClass.toUpperCase()}</span>
+        </div>
+        <div class="metric">
+          <strong>Samples:</strong> ${rtts.length} successful out of ${NUM_REQUESTS}
+        </div>
+
+        <h4>Microsoft Teams Recommendations</h4>
+        <ul>
+          <li>Latency: &lt;100ms ideal (round-trip)</li>
+          <li>Jitter: &lt;30ms ideal</li>
+          <li>Packet Loss: &lt;1% ideal, &lt;5% maximum</li>
+          <li>Bandwidth: &gt;1.5Mbps recommended for HD video calls</li>
+        </ul>
+      `;
+
+      startBtn.disabled = false;
+      startBtn.textContent = "Run test again";
+    }
+
+    startBtn.addEventListener("click", runTest);
+  </script>
+</body>
+</html>

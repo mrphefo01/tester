@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -80,24 +81,15 @@
   <div id="explanation">
     <p><strong>How it works</strong></p>
     <ul>
-      <li>We send 150 requests (~1 KB each) to our server.</li>
-      <li>We measure round-trip time (latency), variation (jitter), packet loss, and estimated download speed.</li>
-      <li>Results are compared against Microsoft's current Teams network recommendations.</li>
+      <li>We send 150 requests (~1KB each) to our server.</li>
+      <li>We measure round-trip time (latency), variation (jitter), packet loss, and estimated speed.</li>
+      <li>Results are compared against Microsoft's Teams network guidelines.</li>
     </ul>
-    <p><strong>Note:</strong> First test may take longer due to server wake-up (Render free tier). This measures download only — upload may differ.</p>
     <p>No personal data is collected.</p>
   </div>
 
   <script>
-    // ────────────────────────────────────────────────
-    // Backend URL configuration
-    // ────────────────────────────────────────────────
-    const isGitHubPages = window.location.hostname.includes('github.io');
-    const backendBase = isGitHubPages
-      ? 'https://tester-914t.onrender.com'
-      : '';  // relative path when running locally or from same-origin server
-
-    const TEST_URL = `${backendBase}/ping?cachebust=`;
+    const TEST_URL = "/ping?cachebust=";
     const NUM_REQUESTS = 150;
     const TIMEOUT_MS = 3000;
     const APPROX_PAYLOAD_BYTES = 1024;
@@ -156,8 +148,7 @@
         const text = await response.text();
         const end = performance.now();
 
-        // Since payload is ASCII, text.length is accurate & faster than TextEncoder
-        const bytes = text.length;
+        const bytes = new TextEncoder().encode(text).length;
         const durationSec = (end - start) / 1000;
         const speedKbps = durationSec > 0 ? (bytes * 8) / durationSec / 1000 : 0;
 
@@ -195,11 +186,11 @@
       const avgSpeed = speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
       const packetLossPct = (failed / NUM_REQUESTS) * 100;
 
-      // Updated 2026-aligned thresholds (Microsoft / best practices)
-      const latencyClass   = classifyMetric(avg,       150,  300);   // ms
-      const jitterClass    = classifyMetric(stdDev,     30,   60);   // ms
-      const lossClass      = classifyMetric(packetLossPct,  1,    5);   // %
-      const bandwidthClass = classifyMetric(avgSpeed, 1500,  800);   // Kbps
+      // Microsoft-aligned thresholds
+      const latencyClass = classifyMetric(avg, 100, 150);
+      const jitterClass = classifyMetric(stdDev, 30, 60);
+      const lossClass = classifyMetric(packetLossPct, 1, 5);
+      const bandwidthClass = classifyMetric(avgSpeed, 1500, 500); // >1.5Mbps good for HD
 
       const order = { green: 1, yellow: 2, red: 3 };
       let overallClass = "green";
@@ -209,13 +200,8 @@
 
       let overallText = "";
       if (overallClass === "green") overallText = "Excellent! Your network is ideal for high-quality Teams calls.";
-      else if (overallClass === "yellow") overallText = "Fair – minor issues (occasional delays, reduced video quality) possible.";
-      else overallText = "Poor – significant issues (choppy audio/video, freezing) are likely.";
-
-      if (failed > NUM_REQUESTS * 0.4) {
-        overallText = "Too many requests failed. Check your connection or try again later.";
-        overallClass = "red";
-      }
+      else if (overallClass === "yellow") overallText = "Fair – you may experience minor issues like occasional delays or reduced video quality.";
+      else overallText = "Poor – significant issues (choppy audio/video, freezing) are likely in Teams calls.";
 
       statusBadge.style.display = "inline-block";
       statusBadge.classList.add(overallClass);
@@ -225,32 +211,32 @@
       resultsDiv.innerHTML = `
         <h3>Detailed Results</h3>
         <div class="metric">
-          <strong>Average Latency:</strong> ${avg.toFixed(0)} ms
+          <strong>Average Latency:</strong> ${avg.toFixed(0)} ms 
           <span class="badge ${latencyClass}">${latencyClass.toUpperCase()}</span>
-          <small>(min: ${min.toFixed(0)} ms, max: ${max.toFixed(0)} ms, median: ${median.toFixed(0)} ms)</small>
+          <small>(min: ${min.toFixed(0)}ms, max: ${max.toFixed(0)}ms, median: ${median.toFixed(0)}ms)</small>
         </div>
         <div class="metric">
-          <strong>Jitter:</strong> ${stdDev.toFixed(0)} ms
+          <strong>Jitter:</strong> ${stdDev.toFixed(0)} ms 
           <span class="badge ${jitterClass}">${jitterClass.toUpperCase()}</span>
         </div>
         <div class="metric">
-          <strong>Packet Loss:</strong> ${packetLossPct.toFixed(1)}%
+          <strong>Packet Loss:</strong> ${packetLossPct.toFixed(1)}% 
           <span class="badge ${lossClass}">${lossClass.toUpperCase()}</span>
         </div>
         <div class="metric">
-          <strong>Est. Download Speed:</strong> ${avgSpeed.toFixed(0)} Kbps
+          <strong>Est. Download Speed:</strong> ${avgSpeed.toFixed(0)} Kbps 
           <span class="badge ${bandwidthClass}">${bandwidthClass.toUpperCase()}</span>
         </div>
         <div class="metric">
           <strong>Samples:</strong> ${rtts.length} successful out of ${NUM_REQUESTS}
         </div>
 
-        <h4>Microsoft Teams Recommendations (2025–2026)</h4>
+        <h4>Microsoft Teams Recommendations</h4>
         <ul>
-          <li>Latency (RTT): &lt;150 ms ideal, &lt;300 ms acceptable</li>
-          <li>Jitter: &lt;30 ms ideal</li>
-          <li>Packet Loss: &lt;1% ideal, &lt;5% acceptable</li>
-          <li>Bandwidth: &gt;1.5 Mbps recommended for HD video (per direction)</li>
+          <li>Latency: &lt;100ms ideal (round-trip)</li>
+          <li>Jitter: &lt;30ms ideal</li>
+          <li>Packet Loss: &lt;1% ideal, &lt;5% maximum</li>
+          <li>Bandwidth: &gt;1.5Mbps recommended for HD video calls</li>
         </ul>
       `;
 

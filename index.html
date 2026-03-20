@@ -186,9 +186,9 @@
       const avgSpeed = speeds.length ? speeds.reduce((a, b) => a + b, 0) / speeds.length : 0;
       const packetLossPct = (failed / NUM_REQUESTS) * 100;
 
-      const latencyClass = classifyMetric(avg, 100, 150);
-      const jitterClass = classifyMetric(stdDev, 30, 60);
-      const lossClass = classifyMetric(packetLossPct, 1, 5);
+      const latencyClass  = classifyMetric(avg, 220, 320);
+      const jitterClass   = classifyMetric(stdDev, 50, 80);
+      const lossClass     = classifyMetric(packetLossPct, 1, 5);
       const bandwidthClass = classifyMetric(avgSpeed, 1500, 500);
 
       const order = { green: 1, yellow: 2, red: 3 };
